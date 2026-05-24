@@ -1,182 +1,124 @@
-require('dotenv').config();
+require("dotenv").config();
 
-const TelegramBot = require('node-telegram-bot-api');
-const axios = require('axios');
+const express = require("express");
+const axios = require("axios");
+const { EMA, RSI, ATR } = require("technicalindicators");
+const TelegramBot = require("node-telegram-bot-api");
 
-const {
-  EMA,
-  RSI,
-  ATR
-} = require('technicalindicators');
+const app = express();
+app.use(express.json());
 
-const bot = new TelegramBot(process.env.BOT_TOKEN, {
-  polling: false
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
+
+let latestSignal = null;
+
+// 📡 SERVER OVERLAY
+app.get("/signal", (req, res) => {
+  res.json(latestSignal);
 });
 
-const PAIRS = [
-  'EUR/USD',
-  'GBP/JPY',
-  'EUR/JPY',
-  'GBP/USD',
-  'USD/JPY',
-  'BTC/USD'
-];
-
-const INTERVAL = '1min';
-
-async function fetchMarketData(symbol) {
+// 📊 FETCH DATA
+async function getData(pair) {
   try {
-    const response = await axios.get(
-      `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${INTERVAL}&outputsize=100&apikey=${process.env.TWELVE_API_KEY}`
+    const res = await axios.get(
+      `https://api.twelvedata.com/time_series?symbol=${pair}&interval=1min&outputsize=100&apikey=${process.env.TWELVE_API_KEY}`
     );
 
-    return response.data.values.reverse();
-  } catch (error) {
-    console.log('DATA ERROR:', error.message);
+    if (!res.data.values) return null;
+    return res.data.values.reverse();
+  } catch {
     return null;
   }
 }
 
-function calculateIndicators(data) {
-  const closes = data.map(c => parseFloat(c.close));
-  const highs = data.map(c => parseFloat(c.high));
-  const lows = data.map(c => parseFloat(c.low));
+// 🧠 INDICATORS
+function calc(data) {
+  const close = data.map(c => +c.close);
+  const high = data.map(c => +c.high);
+  const low = data.map(c => +c.low);
 
-  const ema9 = EMA.calculate({
-    period: 9,
-    values: closes
-  });
+  const ema9 = EMA.calculate({ period: 9, values: close });
+  const ema21 = EMA.calculate({ period: 21, values: close });
+  const rsi = RSI.calculate({ period: 14, values: close });
+  const atr = ATR.calculate({ high, low, close, period: 10 });
 
-  const ema21 = EMA.calculate({
-    period: 21,
-    values: closes
-  });
-
-  const rsi = RSI.calculate({
-    period: 14,
-    values: closes
-  });
-
-  const atr = ATR.calculate({
-    high: highs,
-    low: lows,
-    close: closes,
-    period: 10
-  });
+  if (!ema9.length || !ema21.length || !rsi.length || !atr.length) return null;
 
   return {
-    close: closes[closes.length - 1],
-    previousClose: closes[closes.length - 2],
-    ema9: ema9[ema9.length - 1],
-    ema21: ema21[ema21.length - 1],
-    rsi: rsi[rsi.length - 1],
-    atr: atr[atr.length - 1]
+    close: close.at(-1),
+    prev: close.at(-2),
+    ema9: ema9.at(-1),
+    ema21: ema21.at(-1),
+    rsi: rsi.at(-1),
+    atr: atr.at(-1)
   };
 }
 
-function generateSignal(indicators) {
-  let confidence = 0;
-  let signal = null;
-  let momentum = 'LOW';
+// 🔥 SIGNAL ENGINE
+function signal(i) {
+  let score = 0;
+  let type = null;
 
-  const bullishMomentum =
-    indicators.close > indicators.previousClose;
+  const up = i.ema9 > i.ema21;
+  const down = i.ema9 < i.ema21;
 
-  const bearishMomentum =
-    indicators.close < indicators.previousClose;
+  const atrP = (i.atr / i.close) * 100;
+  if (atrP < 0.04) return null;
 
-  if (
-    indicators.ema9 > indicators.ema21 &&
-    bullishMomentum &&
-    indicators.rsi > 45
-  ) {
-    signal = 'BUY';
-    confidence += 40;
+  if (up && i.rsi > 50) {
+    type = "BUY";
+    score += 60;
   }
 
-  if (
-    indicators.ema9 < indicators.ema21 &&
-    bearishMomentum &&
-    indicators.rsi < 55
-  ) {
-    signal = 'SELL';
-    confidence += 40;
+  if (down && i.rsi < 50) {
+    type = "SELL";
+    score += 60;
   }
 
-  if (indicators.rsi > 60 || indicators.rsi < 40) {
-    confidence += 20;
-  }
+  if (!type) return null;
 
-  if (indicators.atr > 0.05) {
-    confidence += 20;
-    momentum = 'HIGH';
-  }
+  if (score < 70) return null;
 
-  if (confidence >= 80) {
-    return {
-      signal,
-      confidence,
-      momentum,
-      mode: 'ULTRA'
-    };
-  }
-
-  if (confidence >= 60) {
-    return {
-      signal,
-      confidence,
-      momentum,
-      mode: 'SNIPER'
-    };
-  }
-
-  return null;
+  return {
+    pair: "MARKET",
+    signal: type,
+    score,
+    mode: score > 85 ? "ULTRA" : "ELITE"
+  };
 }
 
-async function sendTelegramSignal(pair, result) {
-  if (!result || !result.signal) return;
+// 📡 ANALYSE LOOP
+async function run() {
+  const pairs = ["EUR/USD", "BTC/USD", "ETH/USD"];
 
-  const emoji = result.signal === 'BUY' ? '🟢' : '🔴';
+  for (let p of pairs) {
+    const data = await getData(p);
+    if (!data) continue;
 
-  const message = `
-${emoji} ${result.mode} ${result.signal}
+    const i = calc(data);
+    if (!i) continue;
 
-Pair: ${pair}
-Confidence: ${result.confidence}%
-Momentum: ${result.momentum}
-Expiry: 15s
+    const s = signal(i);
+    if (!s) continue;
 
-OTC Sniper AI
+    s.pair = p;
+    latestSignal = s;
+
+    // Telegram alert
+    const msg = `
+🟢 ${s.signal} ${p}
+Score: ${s.score}%
+Mode: ${s.mode}
 `;
 
-  try {
-    await bot.sendMessage(process.env.CHAT_ID, message);
-    console.log('SIGNAL SENT:', pair);
-  } catch (error) {
-    console.log('TELEGRAM ERROR:', error.message);
+    bot.sendMessage(process.env.CHAT_ID, msg);
   }
 }
 
-async function analyzePair(pair) {
-  const data = await fetchMarketData(pair);
+setInterval(run, 30000);
+run();
 
-  if (!data || data.length < 30) return;
-
-  const indicators = calculateIndicators(data);
-
-  const signal = generateSignal(indicators);
-
-  await sendTelegramSignal(pair, signal);
-}
-
-async function runBot() {
-  console.log('OTC SNIPER BOT STARTED...');
-
-  for (const pair of PAIRS) {
-    await analyzePair(pair);
-  }
-}
-
-setInterval(runBot, 15000);
-
-runBot();
+// 🚀 START SERVER
+app.listen(3000, () => {
+  console.log("TRADING DESK PRO RUNNING ON PORT 3000");
+});
