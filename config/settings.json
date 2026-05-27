@@ -1,0 +1,8 @@
+{
+  "pair": "EUR/USD",
+  "timeframe": "1m",
+  "minConfidence": 90,
+  "tradeAmount": 10,
+  "autoTrade": true,
+  "telegram": true
+}
