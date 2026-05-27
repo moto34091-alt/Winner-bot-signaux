@@ -1,0 +1,40 @@
+body{
+background:#050816;
+font-family:Arial;
+color:white;
+text-align:center;
+padding:40px;
+}
+
+.container{
+max-width:400px;
+margin:auto;
+}
+
+.card{
+background:#111827;
+padding:30px;
+border-radius:20px;
+margin-top:30px;
+box-shadow:0 0 20px rgba(0,255,255,0.3);
+}
+
+.buy{
+background:#00ff88;
+color:black;
+padding:15px 30px;
+border:none;
+border-radius:10px;
+margin:10px;
+font-size:18px;
+}
+
+.sell{
+background:#ff0044;
+color:white;
+padding:15px 30px;
+border:none;
+border-radius:10px;
+margin:10px;
+font-size:18px;
+}
