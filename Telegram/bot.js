@@ -1,6 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 
-const token = 'YOUR_BOT_TOKEN';
+const token = 'TON_TOKEN_ICI';
 
 const bot = new TelegramBot(token, {
   polling: true
@@ -9,18 +9,33 @@ const bot = new TelegramBot(token, {
 bot.onText(/\/start/, (msg) => {
 
   bot.sendMessage(msg.chat.id,
-`🚀 SNIPER AI PRO ACTIVATED\n\nAUTO TRADING READY`
+
+`🚀 SNIPER AI PRO ACTIVATED
+
+✅ STATUS: ONLINE
+✅ AUTO TRADE: READY
+✅ OTC MODE: ACTIVE
+✅ AI ENGINE: ACTIVE
+✅ SIGNAL SYSTEM: CONNECTED`
+
   );
+
 });
 
-function sendSignal(signal) {
+function sendSignal(signal, confidence) {
 
   bot.sendMessage(
-    'CHAT_ID',
-`📈 ${signal.signal}\n🔥 ${signal.confidence}%`
+    '5161872804',
+
+`📈 SIGNAL ALERT
+
+PAIR: EUR/USD
+SIGNAL: ${signal}
+CONFIDENCE: ${confidence}%
+
+🔥 SNIPER AI PRO`
   );
+
 }
 
-module.exports = {
-  sendSignal
-};
+console.log('BOT RUNNING...');
